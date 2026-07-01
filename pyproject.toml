@@ -1,0 +1,17 @@
+[project]
+name = "glb-viewer"
+version = "0.1.0"
+description = "Sample slangpy glTF/GLB scene viewer with camera and light indicators"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=1.26.0",
+    "pygltflib>=1.16.2",
+    "pillow>=10.0.0",
+    "slangpy",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+slangpy = { git = "https://github.com/iveevi/slangpy" }
