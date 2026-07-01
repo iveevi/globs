@@ -1,8 +1,8 @@
 import argparse
 import logging
 
-import logsetup
-from viewer import Viewer
+from . import logsetup
+from .viewer import Viewer
 
 
 def main():

@@ -3,10 +3,10 @@ from pathlib import Path
 import numpy as np
 import slangpy as spy
 
-import env
-import gizmos
-from camera import FlyCamera
-from gltf_loader import load_scene
+from . import env
+from . import gizmos
+from .camera import FlyCamera
+from .gltf_loader import load_scene
 
 SHADER_DIR = Path(__file__).resolve().parent / "shaders"
 FONT_DIR = Path(__file__).resolve().parent / "font"
