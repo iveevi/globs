@@ -71,7 +71,7 @@ def directional_gizmo(pos, direction, length, color):
     v = np.cross(d, u)
     h = length * 0.18
     back = tip - d * h
-    parts = [line(pos, tip, color), circle(pos, d, length * 0.12, color, 16)]
+    parts = [line(pos, tip, color), circle(pos, d, length * 0.12, color, 48)]
     for vec in (u, v, -u, -v):
         parts.append(line(tip, back + vec * h, color))
     return np.concatenate(parts)
@@ -80,9 +80,9 @@ def directional_gizmo(pos, direction, length, color):
 def point_gizmo(pos, radius, color):
     return np.concatenate(
         [
-            circle(pos, [1, 0, 0], radius, color, 24),
-            circle(pos, [0, 1, 0], radius, color, 24),
-            circle(pos, [0, 0, 1], radius, color, 24),
+            circle(pos, [1, 0, 0], radius, color, 64),
+            circle(pos, [0, 1, 0], radius, color, 64),
+            circle(pos, [0, 0, 1], radius, color, 64),
         ]
     )
 
@@ -100,7 +100,7 @@ def spot_gizmo(pos, direction, outer_angle, length, color):
     v = np.cross(d, u)
     rim = [base + radius * (math.cos(a) * u + math.sin(a) * v) for a in
            np.linspace(0, 2 * math.pi, 5)[:-1]]
-    parts = [circle(base, d, radius, color, 32)]
+    parts = [circle(base, d, radius, color, 96)]
     for r in rim:
         parts.append(line(pos, r, color))
     return np.concatenate(parts)

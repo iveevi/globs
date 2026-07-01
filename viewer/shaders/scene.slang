@@ -2,6 +2,7 @@ struct VSIn {
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
+    uint material : MATERIAL;
 };
 
 struct VSOut {
@@ -9,6 +10,7 @@ struct VSOut {
     float3 wnormal : NORMAL;
     float3 wpos : POSITION0;
     float2 uv : TEXCOORD0;
+    nointerpolation uint material : MATERIAL;
 };
 
 struct Camera {
@@ -17,16 +19,24 @@ struct Camera {
     float pad;
 };
 
-struct Draw {
+// Bindless material: factors plus descriptor handles for each texture. The
+// whole table binds once, so the scene draws in a single call.
+struct Material {
     float4 base_color;
+    float3 emissive;
+    float metallic;
+    float roughness;
+    float occlusion_strength;
     uint has_texture;
     uint has_mr_texture;
     uint has_occ_texture;
     uint has_normal_texture;
-    float metallic;
-    float roughness;
-    float occlusion_strength;
-    float pad1;
+    uint has_emissive;
+    Texture2D<float4>.Handle base_tex;
+    Texture2D<float4>.Handle mr_tex;
+    Texture2D<float4>.Handle occ_tex;
+    Texture2D<float4>.Handle normal_tex;
+    Texture2D<float4>.Handle emissive_tex;
 };
 
 struct DirLight {
@@ -44,12 +54,7 @@ struct PointLight {
 };
 
 ParameterBlock<Camera> g_camera;
-ParameterBlock<Draw> g_draw;
-
-Texture2D g_base_color;
-Texture2D g_mr_texture;
-Texture2D g_occ_texture;
-Texture2D g_normal_texture;
+StructuredBuffer<Material> g_materials;
 SamplerState g_sampler;
 
 Texture2D g_shadow_map;
@@ -62,6 +67,7 @@ StructuredBuffer<float4> g_sh;
 uniform uint g_num_dir;
 uniform uint g_num_point;
 uniform uint g_shading_mode;
+uniform uint g_use_env;
 uniform uint g_alpha_cutout;
 uniform float3 g_headlight_dir;
 uniform float3 g_cam_right;
@@ -80,6 +86,7 @@ VSOut vs_main(VSIn in)
     o.clip = mul(g_camera.view_proj, float4(wp, 1.0));
     o.wnormal = in.normal;
     o.uv = in.uv;
+    o.material = in.material;
     return o;
 }
 
@@ -171,18 +178,27 @@ float4 fs_main(VSOut in)
     : SV_Target
 {
     float3 N = normalize(in.wnormal);
+    Material mat = g_materials[in.material];
 
-    float4 albedo = g_draw.base_color;
-    if (g_draw.has_texture != 0)
-        albedo *= g_base_color.Sample(g_sampler, in.uv);
+    float4 albedo = mat.base_color;
+    if (mat.has_texture != 0)
+        albedo *= mat.base_tex.Sample(g_sampler, in.uv);
 
     // alpha cutout: drop fragments below the mask threshold (foliage, grates)
     if (g_alpha_cutout != 0 && albedo.a < 0.5)
         discard;
 
+    float3 emissive = mat.emissive;
+    if (mat.has_emissive != 0)
+        emissive *= mat.emissive_tex.Sample(g_sampler, in.uv).rgb;
+
     // mode 2: unlit albedo
     if (g_shading_mode == 2)
         return float4(encode_srgb(albedo.rgb), 1.0);
+
+    // mode 9: emission only
+    if (g_shading_mode == 9)
+        return float4(tonemap(emissive), 1.0);
 
     // mode 3: geometric (interpolated vertex) normals
     if (g_shading_mode == 3)
@@ -191,29 +207,29 @@ float4 fs_main(VSOut in)
     // mode 4: shading normals (geometric normal perturbed by the normal map)
     if (g_shading_mode == 4) {
         float3 sn = N;
-        if (g_draw.has_normal_texture != 0)
-            sn = perturb_normal(N, in.wpos, in.uv, g_normal_texture.Sample(g_sampler, in.uv).rgb);
+        if (mat.has_normal_texture != 0)
+            sn = perturb_normal(N, in.wpos, in.uv, mat.normal_tex.Sample(g_sampler, in.uv).rgb);
         return float4(sn * 0.5 + 0.5, 1.0);
     }
 
     // glTF packs metalness in B, roughness in G; occlusion in R of its texture.
     // modes 5/6/7: metallic / roughness / occlusion as a magma heatmap.
     if (g_shading_mode == 5) {
-        float m = g_draw.metallic;
-        if (g_draw.has_mr_texture != 0)
-            m *= g_mr_texture.Sample(g_sampler, in.uv).b;
+        float m = mat.metallic;
+        if (mat.has_mr_texture != 0)
+            m *= mat.mr_tex.Sample(g_sampler, in.uv).b;
         return float4(magma(m), 1.0);
     }
     if (g_shading_mode == 6) {
-        float r = g_draw.roughness;
-        if (g_draw.has_mr_texture != 0)
-            r *= g_mr_texture.Sample(g_sampler, in.uv).g;
+        float r = mat.roughness;
+        if (mat.has_mr_texture != 0)
+            r *= mat.mr_tex.Sample(g_sampler, in.uv).g;
         return float4(magma(r), 1.0);
     }
     if (g_shading_mode == 7) {
         float o = 1.0;
-        if (g_draw.has_occ_texture != 0)
-            o = 1.0 + g_draw.occlusion_strength * (g_occ_texture.Sample(g_sampler, in.uv).r - 1.0);
+        if (mat.has_occ_texture != 0)
+            o = 1.0 + mat.occlusion_strength * (mat.occ_tex.Sample(g_sampler, in.uv).r - 1.0);
         return float4(magma(o), 1.0);
     }
 
@@ -239,8 +255,10 @@ float4 fs_main(VSOut in)
         return float4(encode_srgb(lit), 1.0);
     }
 
-    // mode 0: Lit -- environment SH irradiance plus the punctual lights.
-    float3 lit = albedo.rgb * sh_irradiance(N);
+    // mode 0: Shaded -- environment SH irradiance plus the punctual lights.
+    // With the environment off, fall back to a flat ambient fill.
+    float3 lit = g_use_env != 0 ? albedo.rgb * sh_irradiance(N)
+                                : albedo.rgb * g_ambient;
     for (uint i = 0; i < g_num_dir; i++) {
         DirLight l = g_dir_lights[i];
         float3 L = normalize(-l.direction);
@@ -255,5 +273,6 @@ float4 fs_main(VSOut in)
         float att = 1.0 / (1.0 + dist * dist);
         lit += albedo.rgb * l.color * l.intensity * att * max(dot(N, L), 0.0);
     }
+    lit += emissive;
     return float4(tonemap(lit), 1.0);
 }

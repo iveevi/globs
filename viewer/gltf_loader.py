@@ -40,6 +40,9 @@ class Material:
     metallic_roughness_image: Optional[np.ndarray] = None
     occlusion_image: Optional[np.ndarray] = None
     normal_image: Optional[np.ndarray] = None
+    emissive_factor: tuple = (0.0, 0.0, 0.0)
+    emissive_strength: float = 1.0
+    emissive_image: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -342,7 +345,8 @@ def build_materials(gltf):
         mr_src = tex_source(gltf, pbr.metallicRoughnessTexture) if pbr else None
         occ_src = tex_source(gltf, m.occlusionTexture)
         nrm_src = tex_source(gltf, m.normalTexture)
-        for s in (base_src, mr_src, occ_src, nrm_src):
+        emi_src = tex_source(gltf, m.emissiveTexture)
+        for s in (base_src, mr_src, occ_src, nrm_src, emi_src):
             if s is not None:
                 sources.add(s)
         bf = (pbr.baseColorFactor if pbr and pbr.baseColorFactor else [1.0, 1.0, 1.0, 1.0])
@@ -350,7 +354,11 @@ def build_materials(gltf):
         rf = 1.0 if not pbr or pbr.roughnessFactor is None else pbr.roughnessFactor
         occ_s = (m.occlusionTexture.strength
                  if m.occlusionTexture and m.occlusionTexture.strength is not None else 1.0)
-        infos.append((base_src, mr_src, occ_src, nrm_src, bf, mf, rf, occ_s))
+        ef = m.emissiveFactor if m.emissiveFactor else [0.0, 0.0, 0.0]
+        me = m.extensions.get("KHR_materials_emissive_strength") if isinstance(
+            m.extensions, dict) else None
+        es = float(me.get("emissiveStrength", 1.0)) if isinstance(me, dict) else 1.0
+        infos.append((base_src, mr_src, occ_src, nrm_src, emi_src, bf, mf, rf, occ_s, ef, es))
 
     log.info("textures: decoding %d images", len(sources))
     t0 = time.perf_counter()
@@ -359,7 +367,8 @@ def build_materials(gltf):
              time.perf_counter() - t0)
 
     materials = []
-    for base_src, mr_src, occ_src, nrm_src, bf, mf, rf, occ_s in infos:
+    for (base_src, mr_src, occ_src, nrm_src, emi_src,
+         bf, mf, rf, occ_s, ef, es) in infos:
         materials.append(Material(
             base_color_factor=(float(bf[0]), float(bf[1]), float(bf[2]), float(bf[3])),
             base_color_image=cache.get(base_src),
@@ -369,6 +378,9 @@ def build_materials(gltf):
             metallic_roughness_image=cache.get(mr_src),
             occlusion_image=cache.get(occ_src),
             normal_image=cache.get(nrm_src),
+            emissive_factor=(float(ef[0]), float(ef[1]), float(ef[2])),
+            emissive_strength=float(es),
+            emissive_image=cache.get(emi_src),
         ))
     return materials
 

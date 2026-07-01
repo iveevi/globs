@@ -14,13 +14,21 @@ def main():
                         help="render N frames then exit (testing)")
     parser.add_argument("--screenshot", default="",
                         help="with --frames, write the last frame to this path")
+    parser.add_argument("--mode", type=int, default=0,
+                        help="initial shading mode index (8 = path traced)")
+    parser.add_argument("--gltf-cam", type=int, default=-1,
+                        help="start looking through glTF camera N")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="verbose logging (per-texture decode, etc.)")
     args = parser.parse_args()
 
     logsetup.setup(logging.DEBUG if args.verbose else logging.INFO)
 
-    Viewer(args.model).run(max_frames=args.frames, screenshot=args.screenshot)
+    viewer = Viewer(args.model)
+    viewer.shading_mode = args.mode
+    if 0 <= args.gltf_cam < len(viewer.scene.cameras):
+        viewer.camera.set_from_gltf(viewer.scene.cameras[args.gltf_cam])
+    viewer.run(max_frames=args.frames, screenshot=args.screenshot)
 
 
 if __name__ == "__main__":
