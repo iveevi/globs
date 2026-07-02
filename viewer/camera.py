@@ -12,6 +12,7 @@ class FlyCamera:
         self.pitch = 0.3
         self.fov_y = math.radians(50.0)
         self.move_scale = 1.0
+        self.cam_aspect = None
 
     def forward(self):
         cp = math.cos(self.pitch)
@@ -55,6 +56,7 @@ class FlyCamera:
         self.move_scale = r
         self.yaw = 0.0
         self.pitch = 0.3
+        self.cam_aspect = None
         d = r / max(math.sin(self.fov_y * 0.5), 1e-3) * 1.1
         self.position = np.array(center, dtype=np.float64) - self.forward() * d
 
@@ -68,3 +70,13 @@ class FlyCamera:
         )
         self.yaw = math.atan2(-fwd[0], -fwd[2])
         self.fov_y = cam.yfov
+        self.cam_aspect = cam.aspect
+
+    def effective_fov_y(self, window_aspect):
+        # Preserve the glTF camera's intended framing: if the window is
+        # narrower than the authored aspect, widen the vertical fov so the
+        # full intended horizontal extent stays visible (letterbox-style fit).
+        if self.cam_aspect and window_aspect < self.cam_aspect:
+            half_h = math.tan(self.fov_y * 0.5) * self.cam_aspect / window_aspect
+            return 2.0 * math.atan(half_h)
+        return self.fov_y

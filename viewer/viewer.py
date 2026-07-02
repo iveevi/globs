@@ -26,6 +26,7 @@ PATHTRACE_MODE = 8
 ICON_SUN = "\uf185"    # directional (sun)
 ICON_LIGHT = "\uf0eb"  # point (lightbulb)
 ICON_SPOT = "\uf140"   # spot (bullseye / aimed)
+ICON_CAMERA = "\uf030"  # camera
 
 # Shading dropdown rows -> shader mode index: render/lighting modes first, then
 # the raw material-property inspectors.
@@ -347,17 +348,30 @@ class Viewer:
             icons[i, 0:3] = li.position
             icons[i, 3] = type_id.get(li.type, 1.0)
             icons[i, 4:7] = li.color
+        self.icon_world_size = max(float(r) * 0.03, 1e-3)
         self.num_light_icons = len(self.scene.lights)
         self.light_icon_buffer = self.device.create_buffer(
             usage=spy.BufferUsage.shader_resource, struct_size=32,
             element_count=icons.shape[0], data=icons.reshape(-1), label="light_icons")
+
+        # Camera markers: same billboard atlas, glyph tile 3 = camera.
+        cam_icons = np.zeros((max(1, len(self.scene.cameras)), 8), dtype=np.float32)
+        for i, cam in enumerate(self.scene.cameras):
+            cam_icons[i, 0:3] = cam.world[:3, 3]
+            cam_icons[i, 3] = 3.0
+            cam_icons[i, 4:7] = (0.2, 0.9, 0.95)
+        self.num_camera_icons = len(self.scene.cameras)
+        self.camera_icon_buffer = self.device.create_buffer(
+            usage=spy.BufferUsage.shader_resource, struct_size=32,
+            element_count=cam_icons.shape[0], data=cam_icons.reshape(-1),
+            label="camera_icons")
         self.build_light_icon_atlas()
 
     def build_light_icon_atlas(self):
         from PIL import Image, ImageDraw, ImageFont
         tile = 64
-        glyphs = [ICON_SUN, ICON_LIGHT, ICON_SPOT]
-        atlas = Image.new("RGBA", (tile * 3, tile), (0, 0, 0, 0))
+        glyphs = [ICON_SUN, ICON_LIGHT, ICON_SPOT, ICON_CAMERA]
+        atlas = Image.new("RGBA", (tile * len(glyphs), tile), (0, 0, 0, 0))
         draw = ImageDraw.Draw(atlas)
         font = ImageFont.truetype(
             str(FONT_DIR / "CaskaydiaCoveNerdFontMono-Regular.ttf"), 52)
@@ -370,7 +384,8 @@ class Viewer:
         data = np.ascontiguousarray(np.array(atlas, dtype=np.uint8))
         tex = self.device.create_texture(
             type=spy.TextureType.texture_2d, format=spy.Format.rgba8_unorm,
-            width=tile * 3, height=tile, usage=spy.TextureUsage.shader_resource,
+            width=tile * len(glyphs), height=tile,
+            usage=spy.TextureUsage.shader_resource,
             data=data, label="light_icon_atlas")
         self.icon_atlas_view = tex.create_view({})
         self.icon_sampler = self.device.create_sampler(
@@ -738,7 +753,8 @@ class Viewer:
         r = self.mesh.radius
         far = max(d + r * 2.5, r * 0.01)
         near = max(d - r * 2.5, far * 1e-4)
-        proj = spy.math.perspective(self.camera.fov_y, aspect, near, far)
+        proj = spy.math.perspective(
+            self.camera.effective_fov_y(aspect), aspect, near, far)
         return spy.math.mul(proj, view), spy.float3(*eye)
 
     # ---- targets ----------------------------------------------------------
@@ -935,9 +951,28 @@ class Viewer:
                 icur.g_atlas = self.icon_atlas_view
                 icur.g_atlas_sampler = self.icon_sampler
                 icur.g_view_proj = vp
+                icur.g_cam_right = spy.float3(*cam_right)
+                icur.g_cam_up = spy.float3(*cam_up)
+                icur.g_size = self.icon_world_size
                 icur.g_viewport = spy.float2(color.width, color.height)
-                icur.g_size = 28.0
+                icur.g_max_px = 28.0
                 rp.draw({"vertex_count": self.num_light_icons * 6})
+
+            # World-space camera-marker billboards.
+            if self.show_cameras and self.num_camera_icons > 0:
+                rp.set_render_state(full_state)
+                cobj = rp.bind_pipeline(self.icon_pipeline)
+                ccur = spy.ShaderCursor(cobj)
+                ccur.g_lights = self.camera_icon_buffer
+                ccur.g_atlas = self.icon_atlas_view
+                ccur.g_atlas_sampler = self.icon_sampler
+                ccur.g_view_proj = vp
+                ccur.g_cam_right = spy.float3(*cam_right)
+                ccur.g_cam_up = spy.float3(*cam_up)
+                ccur.g_size = self.icon_world_size
+                ccur.g_viewport = spy.float2(color.width, color.height)
+                ccur.g_max_px = 28.0
+                rp.draw({"vertex_count": self.num_camera_icons * 6})
 
     # ---- input ------------------------------------------------------------
 
@@ -965,6 +1000,19 @@ class Viewer:
                 self.want_screenshot = True
             elif event.key in self.move_keys():
                 self.keys_held.add(event.key)
+            else:
+                self.maybe_switch_camera(event.key)
+
+    def maybe_switch_camera(self, key):
+        digit_keys = (
+            spy.KeyCode.key1, spy.KeyCode.key2, spy.KeyCode.key3,
+            spy.KeyCode.key4, spy.KeyCode.key5, spy.KeyCode.key6,
+            spy.KeyCode.key7, spy.KeyCode.key8, spy.KeyCode.key9,
+        )
+        if key in digit_keys:
+            idx = digit_keys.index(key)
+            if idx < len(self.scene.cameras):
+                self.camera.set_from_gltf(self.scene.cameras[idx])
 
     def apply_movement(self, dt):
         kc = spy.KeyCode
@@ -1080,10 +1128,9 @@ class Viewer:
 
         if self.scene.cameras:
             spy.ui.Separator(settings)
-            spy.ui.Text(settings, "Jump to Camera")
-            for cam in self.scene.cameras:
-                spy.ui.Button(settings, cam.name,
-                              callback=lambda c=cam: self.camera.set_from_gltf(c))
+            spy.ui.Text(settings, "Cameras (press 1-9 to switch)")
+            for i, cam in enumerate(self.scene.cameras[:9]):
+                spy.ui.Text(settings, f"{i + 1}: {cam.name}")
 
         self.menu_window = spy.ui.Window(screen, "menubar", overlay=True)
         menu_bar = spy.ui.MenuBar(self.menu_window)

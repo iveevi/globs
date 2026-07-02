@@ -17,6 +17,9 @@ uv run viewer/main.py <file>
 | `scenes/FlatArchiviz.glb` | Flat (archviz interior) | [Blender demo files](https://www.blender.org/download/demo-files/) | Blender Foundation |
 | `scenes/Bathroom.glb` | Contemporary Bathroom | [Bitterli Rendering Resources](https://benedikt-bitterli.me/resources/) | Mareck |
 | `scenes/Bedroom.glb` | Bedroom | [Bitterli Rendering Resources](https://benedikt-bitterli.me/resources/) | SlykDrako |
+| `scenes/CornellBox.glb` | Cornell Box | [Bitterli Rendering Resources](https://benedikt-bitterli.me/resources/) | Benedikt Bitterli |
+| `scenes/VeachBidir.glb` | Veach, Bidir Room | [Bitterli Rendering Resources](https://benedikt-bitterli.me/resources/) | Benedikt Bitterli |
+| `scenes/GlassOfWater.glb` | Glass of Water | [Bitterli Rendering Resources](https://benedikt-bitterli.me/resources/) | aXel |
 
 ### CC BY 3.0
 
